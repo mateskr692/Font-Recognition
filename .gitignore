@@ -1,3 +1,6 @@
 .venv/
 Dataset/
 Backgrounds/
+_Archive/
+_Dataset/
+Checkpoints
