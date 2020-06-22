@@ -6,6 +6,7 @@ from PIL import Image
 import os
 
 
+
 class data_generator:
 
     fontsDir: str
