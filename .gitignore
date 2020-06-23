@@ -1,6 +1,7 @@
 .venv/
+.vscode/
 Dataset/
-Backgrounds/
 _Archive/
 _Dataset/
 Checkpoints
+MainModel.hdf5

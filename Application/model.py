@@ -5,6 +5,7 @@ import numpy as np
 import pathlib
 import matplotlib.pyplot as plt
 from tensorflow.keras.preprocessing import image_dataset_from_directory
+from PIL import Image
 
 
 # model.load_dataset()
@@ -13,22 +14,23 @@ from tensorflow.keras.preprocessing import image_dataset_from_directory
 # model.save()
 # model.load()
 # model.predict()
-class model:
+class networkModel:
 
     IMAGE_WIDTH: int = 105
     IMAGE_HEIGHT: int = 105
-    BATCH_SIZE: int = 128
+    BATCH_SIZE: int = 100
 
     CLASS_COUNT: int = 0
     CLASS_NAMES: typing.List[str] = []
-    EPOCHS: int = 20
+    EPOCHS: int = 80
 
-    model: tf.keras.Sequential
     train_ds: tf.data.Dataset
     test_ds: tf.data.Dataset
+    model: tf.keras.Sequential
 
     def load_dataset(self, data_path: str = r"Dataset") -> None:
 
+        # Class names and count
         self.CLASS_NAMES = os.listdir(os.path.join(data_path, "Test"))
         self.CLASS_COUNT = len(self.CLASS_NAMES)
 
@@ -40,13 +42,16 @@ class model:
         f.writelines(self.CLASS_NAMES)
         f.close()
 
+
+        # Load data and squeeze images to the bounding box
         self.train_ds = image_dataset_from_directory(
             directory=os.path.join(data_path, "Train"),
             labels='inferred',
             label_mode='categorical',
             batch_size=self.BATCH_SIZE,
             image_size=(self.IMAGE_WIDTH, self.IMAGE_HEIGHT),
-            color_mode="grayscale"
+            color_mode="grayscale",
+
         )
 
         self.test_ds = image_dataset_from_directory(
@@ -63,58 +68,68 @@ class model:
 
     def build(self) -> None:
 
+        # Input layer
         self.model = tf.keras.Sequential()
+        self.model.add(tf.keras.layers.GaussianNoise(
+            0.01, input_shape=(self.IMAGE_HEIGHT, self.IMAGE_WIDTH, 1)))
 
-        # Cu Layers
-        self.model.add(tf.keras.layers.Conv2D(64, kernel_size=(
-            48, 48), activation='relu', input_shape=(self.IMAGE_WIDTH, self.IMAGE_HEIGHT, 1)))
+        # Cu layers
+        self.model.add(tf.keras.layers.Conv2D(
+            64, kernel_size=(58, 58), activation='relu'))
         self.model.add(tf.keras.layers.BatchNormalization())
         self.model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
 
         self.model.add(tf.keras.layers.Conv2D(
-            128, kernel_size=(24, 24), activation='relu'))
+            128, kernel_size=(24, 24), activation='relu', padding="same"))
         self.model.add(tf.keras.layers.BatchNormalization())
         self.model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
 
-        self.model.add(tf.keras.layers.Conv2DTranspose(128, (24, 24), strides=(
-            2, 2), activation='relu', padding='same', kernel_initializer='uniform'))
-        self.model.add(tf.keras.layers.UpSampling2D(size=(2, 2)))
-
-        self.model.add(tf.keras.layers.Conv2DTranspose(64, (12, 12), strides=(
-            2, 2), activation='relu', padding='same', kernel_initializer='uniform'))
-        self.model.add(tf.keras.layers.UpSampling2D(size=(2, 2)))
-
-        # Cs Layers
+        # Cs layers
         self.model.add(tf.keras.layers.Conv2D(
-            256, kernel_size=(12, 12), activation='relu'))
+            256, kernel_size=(12, 12), activation='relu', padding="same"))
         self.model.add(tf.keras.layers.Conv2D(
-            256, kernel_size=(12, 12), activation='relu'))
+            256, kernel_size=(12, 12), activation='relu', padding="same"))
         self.model.add(tf.keras.layers.Conv2D(
-            256, kernel_size=(12, 12), activation='relu'))
+            256, kernel_size=(12, 12), activation='relu', padding="same"))
+        self.model.summary()
 
         self.model.add(tf.keras.layers.Flatten())
-        self.model.add(tf.keras.layers.Dense(512, activation='relu'))
+        self.model.add(tf.keras.layers.Dense(
+            512, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.0001)))
         self.model.add(tf.keras.layers.Dropout(0.5))
-        self.model.add(tf.keras.layers.Dense(256, activation='relu'))
+        self.model.add(tf.keras.layers.Dense(
+            256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.0001)))
         self.model.add(tf.keras.layers.Dropout(0.5))
-        self.model.add(tf.keras.layers.Dense(256, activation='relu'))
+        self.model.add(tf.keras.layers.Dense(
+            128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.0001)))
+
+        # Output layer
         self.model.add(tf.keras.layers.Dense(
             self.CLASS_COUNT, activation='softmax'))
+        self.model.summary()
 
-        sgd = tf.keras.optimizers.SGD(
-            lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-        self.model.compile(loss='mean_squared_error',
-                           optimizer=sgd, metrics=['accuracy'])
+        # Compile model
+        opt = tf.keras.optimizers.SGD(
+            learning_rate=0.0075, momentum=0.8, nesterov=True) #decay=0.0005,
+        self.model.compile(optimizer=opt,
+                           loss=tf.keras.losses.BinaryCrossentropy(
+                               from_logits=True),
+                           metrics=['accuracy', tf.keras.losses.BinaryCrossentropy(
+                               from_logits=True, name='binary_crossentropy'), ]
+                           )
 
         return None
 
     # trains a model on given data
 
     def train(self) -> None:
-        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="Checkpoints",
-                                                         save_weights_only=True,
-                                                         verbose=1,
-                                                         period=1)
+        cp_callback = [
+            tf.keras.callbacks.ModelCheckpoint(
+                filepath="Checkpoints", save_weights_only=True, verbose=1, period=1),
+            tf.keras.callbacks.EarlyStopping(
+                monitor='val_binary_crossentropy', patience=10),
+            tf.keras.callbacks.TensorBoard("Logs"),
+        ]
 
         self.model.fit(self.train_ds, epochs=self.EPOCHS,
                        validation_data=self.test_ds, callbacks=[cp_callback])
@@ -125,13 +140,45 @@ class model:
         self.model.save(dir)
 
     def load_model(self, dir: str = "MainModel.hdf5") -> None:
-        self.model = tf.keras.models.load_model(dir)
+        self.model = tf.keras.models.load_model(dir, compile=False)
+        opt = tf.keras.optimizers.SGD(
+            learning_rate=0.0075, momentum=0.8, nesterov=True) #decay=0.0005,
+        self.model.compile(optimizer=opt,
+                           loss=tf.keras.losses.BinaryCrossentropy(
+                               from_logits=True),
+                           metrics=['accuracy', tf.keras.losses.BinaryCrossentropy(
+                               from_logits=True, name='binary_crossentropy'), ]
+                           )
 
+    def test(self) -> None:
+        self.model.evaluate(self.test_ds)
 
-m = model()
-m.load_dataset()
-m.build()
-m.model.summary()
-m.train()
-m.save_model()
-m.load_model()
+    def predict(self, dir: str):
+        img = Image.open(dir)
+        img = img.convert('L')
+        dim = min(img.width, img.height)
+        img = img.crop((0, 0, dim, dim))
+        img = img.resize((self.IMAGE_WIDTH, self.IMAGE_HEIGHT))
+
+        #img = tf.keras.preprocessing.image.img_to_array(img)
+        img = np.expand_dims(img, axis=0)
+
+        prediction = (self.model.predict(img, batch_size=1))[0].tolist()
+        print(prediction)
+
+        m = max(prediction)
+        idx = prediction.index(m)
+        result = self.CLASS_NAMES[idx] + "\n" + str( (m/sum(prediction)) * 100.0) + "%"
+
+        return result
+
+# m = networkModel()
+# m.load_model()
+# m.load_dataset()
+# m.model.summary()
+# m.test()
+# m.build()
+# m.model.summary()
+# m.train()
+# m.save_model()
+
